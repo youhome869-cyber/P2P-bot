@@ -1,9 +1,10 @@
 import logging
+import os
 import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
-TELEGRAM_TOKEN = "8782322070:AAHzQmC2OkjdKmQlVdxR-KXUJDCCNFtQATk"
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "8782322070:AAHzQmC2OkjdKmQlVdxR-KXUJDCCNFtQATk")
 
 settings = {
     "bot_name": "Lucky Money",
@@ -37,8 +38,8 @@ def get_best_price(trade_type="BUY"):
         data = r.json().get("data", [])
         if data:
             return float(data[0]["adv"]["price"])
-    except:
-        pass
+    except Exception as e:
+        logging.error(f"Error: {e}")
     return None
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -96,7 +97,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif query.data == "toggle_bank":
         settings["take_full_bank"] = not settings["take_full_bank"]
-        await button(update, context)
 
     elif query.data == "back":
         status = "🟢 Running" if settings["running"] else "🔴 Stopped"
@@ -113,7 +113,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button))
     print("Bot running...")
-    app.run_polling()
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     main()
