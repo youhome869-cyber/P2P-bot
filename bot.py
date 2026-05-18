@@ -17,7 +17,7 @@ settings = {
     "target_value": 3100,
     "max_orders": 1,
     "take_full_bank": False,
-    "pay_methods": [],
+    "pay_methods":"pay_methods": ["AYA Pay", "Bank Transfer", "CB Pay", "Cash Deposit to Bank", "KBZPay", "WavePay", "Airtime Mobile Top-Up", "Spring Development Bank", "Transfers with specific bank", "Wave Mobile Money", "Wave Money", "Yoma Bank", "uabpay"],
     "running": False,
     "api_key": "",
     "secret_key": ""
