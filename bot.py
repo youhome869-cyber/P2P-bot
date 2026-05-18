@@ -13,7 +13,7 @@ settings = {
     "fiat": "MMK",
     "coin": "USDT",
     "max_amount": 15000000,
-    "min_amount": 180000,
+    "min_amount": 10000,
     "target_value": 3100,
     "max_orders": 1,
     "take_full_bank": False,
