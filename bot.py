@@ -1,6 +1,9 @@
 import logging
 import os
 import requests
+import hmac
+import hashlib
+import time
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
@@ -34,6 +37,7 @@ settings = {
 
 logging.basicConfig(level=logging.INFO)
 user_states = {}
+order_history = []
 
 def is_subscribed(user_id):
     if user_id == ADMIN_ID:
@@ -44,6 +48,8 @@ def is_subscribed(user_id):
     return False
 
 def get_expiry(user_id):
+    if user_id == ADMIN_ID:
+        return "Admin (Unlimited)"
     if user_id in subscriptions:
         return subscriptions[user_id]["expiry"].strftime("%Y-%m-%d")
     return "Not subscribed"
@@ -64,10 +70,93 @@ def get_best_price(trade_type="BUY"):
         r = requests.post(url, json=payload, headers={"Content-Type": "application/json"})
         data = r.json().get("data", [])
         if data:
-            return float(data[0]["adv"]["price"])
+            return data
     except Exception as e:
         logging.error(f"Error: {e}")
-    return None
+    return []
+
+def binance_request(method, endpoint, params={}, api_key="", secret=""):
+    params["timestamp"] = int(time.time() * 1000)
+    query = "&".join([f"{k}={v}" for k, v in params.items()])
+    sig = hmac.new(secret.encode(), query.encode(), hashlib.sha256).hexdigest()
+    url = f"https://api.binance.com{endpoint}?{query}&signature={sig}"
+    headers = {"X-MBX-APIKEY": api_key}
+    if method == "GET":
+        return requests.get(url, headers=headers).json()
+    elif method == "POST":
+        return requests.post(url, headers=headers).json()
+
+async def place_buy_order(context, chat_id):
+    if not settings["running"]:
+        return
+    if not settings["api_key"] or not settings["secret_key"]:
+        await context.bot.send_message(chat_id=chat_id, text="❌ API Key not set! Please add API Key in Settings.")
+        return
+
+    orders = get_best_price("BUY")
+    if not orders:
+        await context.bot.send_message(chat_id=chat_id, text="❌ No P2P orders found!")
+        return
+
+    best = orders[0]
+    price = float(best["adv"]["price"])
+    adv_id = best["adv"]["advNo"]
+    available = float(best["adv"]["surplusAmount"])
+    min_amt = float(best["adv"]["minSingleTransAmount"])
+    max_amt = float(best["adv"]["maxSingleTransAmount"])
+
+    if price > settings["target_value"]:
+        msg = (
+            f"🔴 UNSUCCESS\n\n"
+            f"💱 Rate: {price} {settings['fiat']}\n"
+            f"🎯 Target: {settings['target_value']}\n"
+            f"📊 Diff: {price - settings['target_value']}\n"
+            f"💰 Fiat: {settings['fiat']}\n"
+            f"⏰ {datetime.now().strftime('%H:%M:%S')}"
+        )
+        order_history.append({"status": "UNSUCCESS", "price": price, "time": datetime.now()})
+        await context.bot.send_message(chat_id=chat_id, text=msg)
+        return
+
+    trade_amount = min(settings["max_amount"], max_amt)
+    trade_amount = max(settings["min_amount"], min_amt)
+
+    try:
+        result = binance_request(
+            "POST",
+            "/sapi/v1/c2c/orderMatch/placeOrder",
+            {
+                "advNo": adv_id,
+                "tradeType": "BUY",
+                "fiatAmount": trade_amount,
+            },
+            settings["api_key"],
+            settings["secret_key"]
+        )
+
+        if result.get("code") == "000000":
+            msg = (
+                f"🟢 SUCCESS!\n\n"
+                f"💱 Rate: {price} {settings['fiat']}\n"
+                f"💰 Amount: {trade_amount} {settings['fiat']}\n"
+                f"📦 Order ID: {result.get('data', {}).get('orderNumber', 'N/A')}\n"
+                f"⏰ {datetime.now().strftime('%H:%M:%S')}"
+            )
+            order_history.append({"status": "SUCCESS", "price": price, "amount": trade_amount, "time": datetime.now()})
+            settings["running"] = False
+        else:
+            msg = (
+                f"🔴 UNSUCCESS\n\n"
+                f"💱 Rate: {price} {settings['fiat']}\n"
+                f"❌ Error: {result.get('message', 'Unknown error')}\n"
+                f"⏰ {datetime.now().strftime('%H:%M:%S')}"
+            )
+            order_history.append({"status": "UNSUCCESS", "price": price, "time": datetime.now()})
+
+        await context.bot.send_message(chat_id=chat_id, text=msg)
+
+    except Exception as e:
+        await context.bot.send_message(chat_id=chat_id, text=f"❌ Error placing order: {e}")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
@@ -94,7 +183,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("🚀 Start Bot" if not settings["running"] else "⏹ Stop Bot", callback_data="toggle")],
         [InlineKeyboardButton("⚙️ Settings", callback_data="settings")],
-        [InlineKeyboardButton("📊 Statistics", callback_data="stats")]
+        [InlineKeyboardButton("📊 Statistics", callback_data="stats")],
+        [InlineKeyboardButton("📋 Order History", callback_data="history")]
     ]
     await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -114,18 +204,15 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Send exactly ${plan['price']} USDT to:\n\n"
             f"`{USDT_ADDRESS}`\n\n"
             f"Network: {USDT_NETWORK}\n\n"
-            f"After payment, send the transaction screenshot or TXID to confirm your payment.\n\n"
-            f"⚠️ Make sure to send the exact amount!"
+            f"After payment, send the transaction screenshot or TXID.\n\n"
+            f"⚠️ Send the exact amount!"
         )
         user_states[chat_id] = f"waiting_payment_{plan_key}"
         keyboard = [[InlineKeyboardButton("◀️ Back", callback_data="back_to_plans")]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
     elif query.data == "back_to_plans":
-        text = (
-            "⭐ Choose Your Plan!\n\n"
-            "Ready to buy your subscription? Select the plan that fits your needs:"
-        )
+        text = "⭐ Choose Your Plan!\n\nSelect the plan that fits your needs:"
         keyboard = [
             [InlineKeyboardButton("1 month - 150$", callback_data="buy_1month")],
             [InlineKeyboardButton("3 months - 400$", callback_data="buy_3months")],
@@ -144,7 +231,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 await context.bot.send_message(
                     chat_id=target_user,
-                    text=f"✅ Your subscription has been approved!\n\nPlan: {plan['name']}\nExpiry: {expiry.strftime('%Y-%m-%d')}\n\nSend /start to begin!"
+                    text=f"✅ Subscription Approved!\n\nPlan: {plan['name']}\nExpiry: {expiry.strftime('%Y-%m-%d')}\n\nSend /start to begin! 🚀"
                 )
             except:
                 pass
@@ -157,7 +244,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 await context.bot.send_message(
                     chat_id=target_user,
-                    text="❌ Your payment was not confirmed. Please contact admin or try again."
+                    text="❌ Payment not confirmed. Please contact admin or try again."
                 )
             except:
                 pass
@@ -167,7 +254,12 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("⚠️ Please subscribe first!", show_alert=True)
             return
         settings["running"] = not settings["running"]
-        status = "🟢 Bot Started!" if settings["running"] else "🔴 Bot Stopped!"
+        if settings["running"]:
+            status = "🟢 Bot Started!\n\nBot is now scanning P2P orders..."
+            await context.bot.send_message(chat_id=chat_id, text="🔍 Scanning P2P orders...")
+            await place_buy_order(context, chat_id)
+        else:
+            status = "🔴 Bot Stopped!"
         keyboard = [[InlineKeyboardButton("◀️ Back", callback_data="back")]]
         await query.edit_message_text(status, reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -192,6 +284,19 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
+    elif query.data == "history":
+        if not order_history:
+            text = "📋 Order History\n\nNo orders yet."
+        else:
+            text = "📋 Order History (Last 10)\n\n"
+            for order in order_history[-10:]:
+                emoji = "🟢" if order["status"] == "SUCCESS" else "🔴"
+                text += f"{emoji} {order['status']}\n"
+                text += f"💱 Rate: {order['price']} {settings['fiat']}\n"
+                text += f"⏰ {order['time'].strftime('%H:%M:%S')}\n\n"
+        keyboard = [[InlineKeyboardButton("◀️ Back", callback_data="back")]]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
     elif query.data == "set_botname":
         user_states[chat_id] = "waiting_botname"
         keyboard = [[InlineKeyboardButton("◀️ Cancel", callback_data="settings")]]
@@ -202,11 +307,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🌍 Select Your National Currency!\n\n"
             "To ensure orders at the best prices in your market, "
             "please choose the currency of your country.\n\n"
-            "For example: if you're in Myanmar, enter MMK; "
-            "if in Thailand, enter THB; if in USA, enter USD.\n\n"
-            "What is the currency code for your country?\n\n"
-            "Simply enter the currency code of your country "
-            "to get started and personalize your trading journey. "
             "Happy trading! 🚀"
         )
         keyboard = [
@@ -232,7 +332,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(f"✅ Fiat changed to: {fiat}", reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif query.data == "set_coin":
-        text = "🪙 Select Your Coin!\n\nPlease choose the cryptocurrency you want to trade."
+        text = "🪙 Select Your Coin!"
         keyboard = [
             [InlineKeyboardButton("USDT", callback_data="coin_USDT")],
             [InlineKeyboardButton("BTC", callback_data="coin_BTC")],
@@ -258,7 +358,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_states[chat_id] = "waiting_max"
         keyboard = [[InlineKeyboardButton("◀️ Cancel", callback_data="settings")]]
         await query.edit_message_text(
-            f"💰 Enter Max Amount:\n\nCurrent: {settings['max_amount']}\n\nType the new amount (numbers only)",
+            f"💰 Enter Max Amount:\n\nCurrent: {settings['max_amount']}\n\nNumbers only",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
@@ -266,7 +366,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_states[chat_id] = "waiting_min"
         keyboard = [[InlineKeyboardButton("◀️ Cancel", callback_data="settings")]]
         await query.edit_message_text(
-            f"💵 Enter Min Amount:\n\nCurrent: {settings['min_amount']}\n\nType the new amount (numbers only)",
+            f"💵 Enter Min Amount:\n\nCurrent: {settings['min_amount']}\n\nNumbers only",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
@@ -274,7 +374,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_states[chat_id] = "waiting_target"
         keyboard = [[InlineKeyboardButton("◀️ Cancel", callback_data="settings")]]
         await query.edit_message_text(
-            f"🎯 Enter Target Price:\n\nCurrent: {settings['target_value']}\n\nType the new target price (numbers only)",
+            f"🎯 Enter Target Price:\n\nCurrent: {settings['target_value']}\n\nNumbers only",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
@@ -305,15 +405,19 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("🔐 Enter your Binance Secret Key:", reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif query.data == "stats":
-        buy = get_best_price("BUY")
-        sell = get_best_price("SELL")
+        orders = get_best_price("BUY")
+        best_buy = orders[0]["adv"]["price"] if orders else "N/A"
+        total = len(order_history)
+        success = len([o for o in order_history if o["status"] == "SUCCESS"])
         text = (
             f"📊 Statistics\n\n"
-            f"💰 Best Buy: {buy} {settings['fiat']}\n"
-            f"💸 Best Sell: {sell} {settings['fiat']}\n"
+            f"💰 Best Buy Price: {best_buy} {settings['fiat']}\n"
             f"🎯 Target Price: {settings['target_value']}\n"
-            f"🤖 Status: {'Running' if settings['running'] else 'Stopped'}\n"
+            f"🤖 Status: {'🟢 Running' if settings['running'] else '🔴 Stopped'}\n"
             f"🔑 API Key: {'✅ Set' if settings['api_key'] else '❌ Not Set'}\n"
+            f"📋 Total Orders: {total}\n"
+            f"✅ Success: {success}\n"
+            f"❌ Unsuccess: {total - success}\n"
             f"📅 Subscription: {get_expiry(user_id)}\n"
         )
         keyboard = [[InlineKeyboardButton("◀️ Back", callback_data="back")]]
@@ -327,10 +431,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif query.data == "back":
         if not is_subscribed(user_id):
-            text = (
-                "⭐ Choose Your Plan!\n\n"
-                "Ready to buy your subscription? Select the plan that fits your needs:"
-            )
+            text = "⭐ Choose Your Plan!\n\nSelect the plan that fits your needs:"
             keyboard = [
                 [InlineKeyboardButton("1 month - 150$", callback_data="buy_1month")],
                 [InlineKeyboardButton("3 months - 400$", callback_data="buy_3months")],
@@ -340,108 +441,4 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         status = "🟢 Running" if settings["running"] else "🔴 Stopped"
         text = f"🎰 {settings['bot_name']} Menu\n\nStatus: {status}"
         keyboard = [
-            [InlineKeyboardButton("🚀 Start Bot" if not settings["running"] else "⏹ Stop Bot", callback_data="toggle")],
-            [InlineKeyboardButton("⚙️ Settings", callback_data="settings")],
-            [InlineKeyboardButton("📊 Statistics", callback_data="stats")]
-        ]
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.message.chat_id
-    user_id = update.message.from_user.id
-    text = update.message.text
-
-    if chat_id in user_states:
-        state = user_states[chat_id]
-
-        if state.startswith("waiting_payment_"):
-            plan_key = state.replace("waiting_payment_", "")
-            plan = SUBSCRIPTION_PLANS[plan_key]
-            await update.message.reply_text(
-                f"✅ Payment screenshot received!\n\nWaiting for admin approval...\n\nPlan: {plan['name']} - ${plan['price']}"
-            )
-            keyboard = [
-                [InlineKeyboardButton(f"✅ Approve {plan['name']}", callback_data=f"approve_{user_id}_{plan_key}")],
-                [InlineKeyboardButton("❌ Reject", callback_data=f"reject_{user_id}_{plan_key}")]
-            ]
-            await context.bot.send_message(
-                chat_id=ADMIN_ID,
-                text=(
-                    f"💳 New Payment Request!\n\n"
-                    f"User ID: {user_id}\n"
-                    f"Username: @{update.message.from_user.username or 'N/A'}\n"
-                    f"Plan: {plan['name']} - ${plan['price']} USDT\n\n"
-                    f"Payment proof received. Please verify and approve/reject."
-                ),
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-            user_states.pop(chat_id)
-
-        elif state == "waiting_botname":
-            settings["bot_name"] = text
-            user_states.pop(chat_id)
-            keyboard = [[InlineKeyboardButton("◀️ Back to Settings", callback_data="settings")]]
-            await update.message.reply_text(f"✅ Bot name changed to: {text}", reply_markup=InlineKeyboardMarkup(keyboard))
-
-        elif state == "waiting_fiat":
-            settings["fiat"] = text.upper()
-            user_states.pop(chat_id)
-            keyboard = [[InlineKeyboardButton("◀️ Back to Settings", callback_data="settings")]]
-            await update.message.reply_text(f"✅ Fiat changed to: {text.upper()}", reply_markup=InlineKeyboardMarkup(keyboard))
-
-        elif state == "waiting_coin":
-            settings["coin"] = text.upper()
-            user_states.pop(chat_id)
-            keyboard = [[InlineKeyboardButton("◀️ Back to Settings", callback_data="settings")]]
-            await update.message.reply_text(f"✅ Coin changed to: {text.upper()}", reply_markup=InlineKeyboardMarkup(keyboard))
-
-        elif state == "waiting_max":
-            try:
-                settings["max_amount"] = int(text)
-                user_states.pop(chat_id)
-                keyboard = [[InlineKeyboardButton("◀️ Back to Settings", callback_data="settings")]]
-                await update.message.reply_text(f"✅ Max amount changed to: {text}", reply_markup=InlineKeyboardMarkup(keyboard))
-            except ValueError:
-                await update.message.reply_text("❌ Numbers only! Example: 15000000")
-
-        elif state == "waiting_min":
-            try:
-                settings["min_amount"] = int(text)
-                user_states.pop(chat_id)
-                keyboard = [[InlineKeyboardButton("◀️ Back to Settings", callback_data="settings")]]
-                await update.message.reply_text(f"✅ Min amount changed to: {text}", reply_markup=InlineKeyboardMarkup(keyboard))
-            except ValueError:
-                await update.message.reply_text("❌ Numbers only! Example: 180000")
-
-        elif state == "waiting_target":
-            try:
-                settings["target_value"] = int(text)
-                user_states.pop(chat_id)
-                keyboard = [[InlineKeyboardButton("◀️ Back to Settings", callback_data="settings")]]
-                await update.message.reply_text(f"✅ Target price changed to: {text}", reply_markup=InlineKeyboardMarkup(keyboard))
-            except ValueError:
-                await update.message.reply_text("❌ Numbers only! Example: 3100")
-
-        elif state == "waiting_api_key":
-            settings["api_key"] = text
-            user_states.pop(chat_id)
-            keyboard = [[InlineKeyboardButton("◀️ Back to API Menu", callback_data="api_key_menu")]]
-            await update.message.reply_text("✅ API Key saved!", reply_markup=InlineKeyboardMarkup(keyboard))
-
-        elif state == "waiting_secret_key":
-            settings["secret_key"] = text
-            user_states.pop(chat_id)
-            keyboard = [[InlineKeyboardButton("◀️ Back to API Menu", callback_data="api_key_menu")]]
-            await update.message.reply_text("✅ Secret Key saved!", reply_markup=InlineKeyboardMarkup(keyboard))
-
-def main():
-    app = Application.builder().token(TELEGRAM_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(button))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_message))
-    print("Bot running...")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
-
-if __name__ == "__main__":
-    main()
+            [InlineKeyboardButton("?
