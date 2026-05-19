@@ -96,7 +96,17 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("🤖 Enter new Bot Name:", reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif query.data == "set_fiat":
-        text = "💱 Select Fiat Currency:"
+        text = (
+            "🌍 Select Your National Currency!\n\n"
+            "To ensure orders at the best prices in your market, "
+            "please choose the currency of your country.\n\n"
+            "For example: if you're in Myanmar, enter MMK; "
+            "if in Thailand, enter THB; if in USA, enter USD.\n\n"
+            "What is the currency code for your country?\n\n"
+            "Simply enter the currency code of your country "
+            "to get started and personalize your trading journey. "
+            "Happy trading! 🚀"
+        )
         keyboard = [
             [InlineKeyboardButton("MMK 🇲🇲", callback_data="fiat_MMK")],
             [InlineKeyboardButton("THB 🇹🇭", callback_data="fiat_THB")],
@@ -113,14 +123,21 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if fiat == "custom":
             user_states[chat_id] = "waiting_fiat"
             keyboard = [[InlineKeyboardButton("◀️ Cancel", callback_data="set_fiat")]]
-            await query.edit_message_text("💱 Enter Fiat currency code:\n\nExample: MMK, THB, USD", reply_markup=InlineKeyboardMarkup(keyboard))
+            await query.edit_message_text(
+                "💱 Enter Fiat currency code:\n\nExample: MMK, THB, USD",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
         else:
             settings["fiat"] = fiat
             keyboard = [[InlineKeyboardButton("◀️ Back", callback_data="settings")]]
             await query.edit_message_text(f"✅ Fiat changed to: {fiat}", reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif query.data == "set_coin":
-        text = "🪙 Select Coin:"
+        text = (
+            "🪙 Select Your Coin!\n\n"
+            "Please choose the cryptocurrency you want to trade.\n\n"
+            "Select from the list or enter a custom coin name."
+        )
         keyboard = [
             [InlineKeyboardButton("USDT", callback_data="coin_USDT")],
             [InlineKeyboardButton("BTC", callback_data="coin_BTC")],
@@ -136,7 +153,10 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if coin == "custom":
             user_states[chat_id] = "waiting_coin"
             keyboard = [[InlineKeyboardButton("◀️ Cancel", callback_data="set_coin")]]
-            await query.edit_message_text("🪙 Enter Coin name:\n\nExample: USDT, BTC, ETH", reply_markup=InlineKeyboardMarkup(keyboard))
+            await query.edit_message_text(
+                "🪙 Enter Coin name:\n\nExample: USDT, BTC, ETH",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
         else:
             settings["coin"] = coin
             keyboard = [[InlineKeyboardButton("◀️ Back", callback_data="settings")]]
