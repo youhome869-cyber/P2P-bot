@@ -180,7 +180,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("Order History", callback_data="history")]
     ]
     await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-    async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+
+async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     chat_id = query.message.chat_id
@@ -417,6 +419,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
     user_id = update.message.from_user.id
@@ -434,97 +437,4 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_id=ADMIN_ID,
                 text=f"New Payment!\n\nUser: {user_id}\n@{update.message.from_user.username or 'N/A'}\nPlan: {plan['name']} - ${plan['price']} USDT",
                 reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-            user_states.pop(chat_id)
-        return
-
-    if chat_id not in user_states:
-        return
-
-    text = update.message.text
-    state = user_states[chat_id]
-
-    if state.startswith("waiting_payment_"):
-        plan_key = state.replace("waiting_payment_", "")
-        plan = SUBSCRIPTION_PLANS[plan_key]
-        await update.message.reply_text(f"Payment proof received!\nWaiting for admin approval...")
-        keyboard = [
-            [InlineKeyboardButton(f"Approve {plan['name']}", callback_data=f"approve_{user_id}_{plan_key}")],
-            [InlineKeyboardButton("Reject", callback_data=f"reject_{user_id}_{plan_key}")]
-        ]
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=f"New Payment!\n\nUser: {user_id}\n@{update.message.from_user.username or 'N/A'}\nPlan: {plan['name']} - ${plan['price']} USDT",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-        user_states.pop(chat_id)
-
-    elif state == "waiting_botname":
-        settings["bot_name"] = text
-        user_states.pop(chat_id)
-        keyboard = [[InlineKeyboardButton("Back", callback_data="settings")]]
-        await update.message.reply_text(f"Bot name changed to: {text}", reply_markup=InlineKeyboardMarkup(keyboard))
-
-    elif state == "waiting_fiat":
-        settings["fiat"] = text.upper()
-        user_states.pop(chat_id)
-        keyboard = [[InlineKeyboardButton("Back", callback_data="settings")]]
-        await update.message.reply_text(f"Fiat changed to: {text.upper()}", reply_markup=InlineKeyboardMarkup(keyboard))
-
-    elif state == "waiting_coin":
-        settings["coin"] = text.upper()
-        user_states.pop(chat_id)
-        keyboard = [[InlineKeyboardButton("Back", callback_data="settings")]]
-        await update.message.reply_text(f"Coin changed to: {text.upper()}", reply_markup=InlineKeyboardMarkup(keyboard))
-
-    elif state == "waiting_max":
-        try:
-            settings["max_amount"] = int(text)
-            user_states.pop(chat_id)
-            keyboard = [[InlineKeyboardButton("Back", callback_data="settings")]]
-            await update.message.reply_text(f"Max amount: {text}", reply_markup=InlineKeyboardMarkup(keyboard))
-        except ValueError:
-            await update.message.reply_text("Numbers only!")
-
-    elif state == "waiting_min":
-        try:
-            settings["min_amount"] = int(text)
-            user_states.pop(chat_id)
-            keyboard = [[InlineKeyboardButton("Back", callback_data="settings")]]
-            await update.message.reply_text(f"Min amount: {text}", reply_markup=InlineKeyboardMarkup(keyboard))
-        except ValueError:
-            await update.message.reply_text("Numbers only!")
-
-    elif state == "waiting_target":
-        try:
-            settings["target_value"] = int(text)
-            user_states.pop(chat_id)
-            keyboard = [[InlineKeyboardButton("Back", callback_data="settings")]]
-            await update.message.reply_text(f"Target price: {text}", reply_markup=InlineKeyboardMarkup(keyboard))
-        except ValueError:
-            await update.message.reply_text("Numbers only!")
-
-    elif state == "waiting_api_key":
-        settings["api_key"] = text
-        user_states.pop(chat_id)
-        keyboard = [[InlineKeyboardButton("Back", callback_data="api_key_menu")]]
-        await update.message.reply_text("API Key saved!", reply_markup=InlineKeyboardMarkup(keyboard))
-
-    elif state == "waiting_secret_key":
-        settings["secret_key"] = text
-        user_states.pop(chat_id)
-        keyboard = [[InlineKeyboardButton("Back", callback_data="api_key_menu")]]
-        await update.message.reply_text("Secret Key saved!", reply_markup=InlineKeyboardMarkup(keyboard))
-
-def main():
-    app = Application.builder().token(TELEGRAM_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(button))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_message))
-    print("Bot running...")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
-
-if __name__ == "__main__":
-    main()
-    
+         
