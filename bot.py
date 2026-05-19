@@ -5,8 +5,6 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
-BINANCE_API_KEY = os.environ.get("BINANCE_API_KEY", "")
-BINANCE_SECRET_KEY = os.environ.get("BINANCE_SECRET_KEY", "")
 
 settings = {
     "bot_name": "Lucky Money",
@@ -78,9 +76,9 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = "⚙️ Settings Menu\nFor optimal bot operation, please ensure all settings are configured:"
         keyboard = [
             [InlineKeyboardButton(f"Bot name [{settings['bot_name']}]", callback_data="set_botname")],
-            [InlineKeyboardButton(f"Fiat [{settings['fiat']}]", callback_data="no")],
+            [InlineKeyboardButton(f"Fiat [{settings['fiat']}]", callback_data="set_fiat")],
             [InlineKeyboardButton(f"Pay Methods [{len(settings['pay_methods'])}]", callback_data="no")],
-            [InlineKeyboardButton(f"Coin [{settings['coin']}]", callback_data="no")],
+            [InlineKeyboardButton(f"Coin [{settings['coin']}]", callback_data="set_coin")],
             [InlineKeyboardButton(f"Max amount [{settings['max_amount']}]", callback_data="no")],
             [InlineKeyboardButton(f"Min amount [{settings['min_amount']}]", callback_data="no")],
             [InlineKeyboardButton(f"Target: [price]", callback_data="no")],
@@ -99,6 +97,66 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🤖 Enter new Bot Name:\n\nType and send the name you want",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
+
+    elif query.data == "set_fiat":
+        text = "💱 Select Fiat Currency:"
+        keyboard = [
+            [InlineKeyboardButton("MMK 🇲🇲", callback_data="fiat_MMK")],
+            [InlineKeyboardButton("THB 🇹🇭", callback_data="fiat_THB")],
+            [InlineKeyboardButton("USD 🇺🇸", callback_data="fiat_USD")],
+            [InlineKeyboardButton("SGD 🇸🇬", callback_data="fiat_SGD")],
+            [InlineKeyboardButton("MYR 🇲🇾", callback_data="fiat_MYR")],
+            [InlineKeyboardButton("✏️ Custom", callback_data="fiat_custom")],
+            [InlineKeyboardButton("◀️ Back", callback_data="settings")]
+        ]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+    elif query.data.startswith("fiat_"):
+        fiat = query.data.replace("fiat_", "")
+        if fiat == "custom":
+            user_states[chat_id] = "waiting_fiat"
+            keyboard = [[InlineKeyboardButton("◀️ Cancel", callback_data="set_fiat")]]
+            await query.edit_message_text(
+                "💱 Enter Fiat currency code:\n\nExample: MMK, THB, USD",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        else:
+            settings["fiat"] = fiat
+            keyboard = [[InlineKeyboardButton("◀️ Back", callback_data="settings")]]
+            await query.edit_message_text(
+                f"✅ Fiat changed to: {fiat}",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+
+    elif query.data == "set_coin":
+        text = "🪙 Select Coin:"
+        keyboard = [
+            [InlineKeyboardButton("USDT", callback_data="coin_USDT")],
+            [InlineKeyboardButton("BTC", callback_data="coin_BTC")],
+            [InlineKeyboardButton("ETH", callback_data="coin_ETH")],
+            [InlineKeyboardButton("BNB", callback_data="coin_BNB")],
+            [InlineKeyboardButton("BUSD", callback_data="coin_BUSD")],
+            [InlineKeyboardButton("✏️ Custom", callback_data="coin_custom")],
+            [InlineKeyboardButton("◀️ Back", callback_data="settings")]
+        ]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+    elif query.data.startswith("coin_"):
+        coin = query.data.replace("coin_", "")
+        if coin == "custom":
+            user_states[chat_id] = "waiting_coin"
+            keyboard = [[InlineKeyboardButton("◀️ Cancel", callback_data="set_coin")]]
+            await query.edit_message_text(
+                "🪙 Enter Coin name:\n\nExample: USDT, BTC, ETH",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        else:
+            settings["coin"] = coin
+            keyboard = [[InlineKeyboardButton("◀️ Back", callback_data="settings")]]
+            await query.edit_message_text(
+                f"✅ Coin changed to: {coin}",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
 
     elif query.data == "api_key_menu":
         api_status = "✅ Set" if settings["api_key"] else "❌ Not Set"
@@ -148,6 +206,9 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "toggle_bank":
         settings["take_full_bank"] = not settings["take_full_bank"]
 
+    elif query.data == "no":
+        await query.answer("Coming soon!", show_alert=True)
+
     elif query.data == "back":
         status = "🟢 Running" if settings["running"] else "🔴 Stopped"
         text = f"🎰 {settings['bot_name']} Menu\n\nStatus: {status}"
@@ -171,6 +232,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard = [[InlineKeyboardButton("◀️ Back to Settings", callback_data="settings")]]
             await update.message.reply_text(
                 f"✅ Bot name changed to: {text}",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+
+        elif state == "waiting_fiat":
+            settings["fiat"] = text.upper()
+            user_states.pop(chat_id)
+            keyboard = [[InlineKeyboardButton("◀️ Back to Settings", callback_data="settings")]]
+            await update.message.reply_text(
+                f"✅ Fiat changed to: {text.upper()}",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+
+        elif state == "waiting_coin":
+            settings["coin"] = text.upper()
+            user_states.pop(chat_id)
+            keyboard = [[InlineKeyboardButton("◀️ Back to Settings", callback_data="settings")]]
+            await update.message.reply_text(
+                f"✅ Coin changed to: {text.upper()}",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
 
