@@ -13,11 +13,11 @@ settings = {
     "fiat": "MMK",
     "coin": "USDT",
     "max_amount": 15000000,
-    "min_amount": 10000,
+    "min_amount": 180000,
     "target_value": 3100,
     "max_orders": 1,
     "take_full_bank": False,
-    "pay_methods":["AYA Pay", "Bank Transfer", "CB Pay", "Cash Deposit to Bank", "KBZPay", "WavePay", "Airtime Mobile Top-Up", "Spring Development Bank", "Transfers with specific bank", "Wave Mobile Money", "Wave Money", "Yoma Bank", "uabpay"],
+    "pay_methods": ["AYA Pay", "Bank Transfer", "CB Pay", "Cash Deposit to Bank", "KBZPay", "WavePay", "Airtime Mobile Top-Up", "Spring Development Bank", "Transfers with specific bank", "Wave Mobile Money", "Wave Money", "Yoma Bank", "uabpay"],
     "running": False,
     "api_key": "",
     "secret_key": ""
@@ -33,7 +33,7 @@ def get_best_price(trade_type="BUY"):
         "fiat": settings["fiat"],
         "merchantCheck": False,
         "page": 1,
-        "payTypes": [],
+        "payTypes": settings["pay_methods"],
         "publisherType": None,
         "rows": 20,
         "tradeType": trade_type
@@ -77,7 +77,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "settings":
         text = "⚙️ Settings Menu\nFor optimal bot operation, please ensure all settings are configured:"
         keyboard = [
-            [InlineKeyboardButton(f"Bot name [{settings['bot_name']}]", callback_data="no")],
+            [InlineKeyboardButton(f"Bot name [{settings['bot_name']}]", callback_data="set_botname")],
             [InlineKeyboardButton(f"Fiat [{settings['fiat']}]", callback_data="no")],
             [InlineKeyboardButton(f"Pay Methods [{len(settings['pay_methods'])}]", callback_data="no")],
             [InlineKeyboardButton(f"Coin [{settings['coin']}]", callback_data="no")],
@@ -91,6 +91,14 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("◀️ Back", callback_data="back")]
         ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+    elif query.data == "set_botname":
+        user_states[chat_id] = "waiting_botname"
+        keyboard = [[InlineKeyboardButton("◀️ Cancel", callback_data="settings")]]
+        await query.edit_message_text(
+            "🤖 Enter new Bot Name:\n\nType and send the name you want",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
     elif query.data == "api_key_menu":
         api_status = "✅ Set" if settings["api_key"] else "❌ Not Set"
@@ -112,7 +120,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_states[chat_id] = "waiting_api_key"
         keyboard = [[InlineKeyboardButton("◀️ Cancel", callback_data="api_key_menu")]]
         await query.edit_message_text(
-            "🔑 Enter your Binance API Key:\n\nType and send your API Key",
+            "🔑 Enter your Binance API Key:",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
@@ -120,7 +128,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_states[chat_id] = "waiting_secret_key"
         keyboard = [[InlineKeyboardButton("◀️ Cancel", callback_data="api_key_menu")]]
         await query.edit_message_text(
-            "🔐 Enter your Binance Secret Key:\n\nType and send your Secret Key",
+            "🔐 Enter your Binance Secret Key:",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
@@ -139,7 +147,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif query.data == "toggle_bank":
         settings["take_full_bank"] = not settings["take_full_bank"]
-        await button(update, context)
 
     elif query.data == "back":
         status = "🟢 Running" if settings["running"] else "🔴 Stopped"
@@ -158,17 +165,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if chat_id in user_states:
         state = user_states[chat_id]
 
-        if state == "waiting_api_key":
+        if state == "waiting_botname":
+            settings["bot_name"] = text
+            user_states.pop(chat_id)
+            keyboard = [[InlineKeyboardButton("◀️ Back to Settings", callback_data="settings")]]
+            await update.message.reply_text(
+                f"✅ Bot name changed to: {text}",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+
+        elif state == "waiting_api_key":
             settings["api_key"] = text
             user_states.pop(chat_id)
             keyboard = [[InlineKeyboardButton("◀️ Back to API Menu", callback_data="api_key_menu")]]
-            await update.message.reply_text("✅ API Key saved successfully!", reply_markup=InlineKeyboardMarkup(keyboard))
+            await update.message.reply_text("✅ API Key saved!", reply_markup=InlineKeyboardMarkup(keyboard))
 
         elif state == "waiting_secret_key":
             settings["secret_key"] = text
             user_states.pop(chat_id)
             keyboard = [[InlineKeyboardButton("◀️ Back to API Menu", callback_data="api_key_menu")]]
-            await update.message.reply_text("✅ Secret Key saved successfully!", reply_markup=InlineKeyboardMarkup(keyboard))
+            await update.message.reply_text("✅ Secret Key saved!", reply_markup=InlineKeyboardMarkup(keyboard))
 
 def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
