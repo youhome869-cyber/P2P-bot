@@ -82,7 +82,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton(f"Max amount [{settings['max_amount']}]", callback_data="set_max")],
             [InlineKeyboardButton(f"Min amount [{settings['min_amount']}]", callback_data="set_min")],
             [InlineKeyboardButton(f"Target: [price]", callback_data="no")],
-            [InlineKeyboardButton(f"Target price/percent [Less {settings['target_value']}]", callback_data="no")],
+            [InlineKeyboardButton(f"Target price [Less {settings['target_value']}]", callback_data="set_target")],
             [InlineKeyboardButton(f"Max num orders [{settings['max_orders']}]", callback_data="no")],
             [InlineKeyboardButton(f"Take Full bank orders [{'On' if settings['take_full_bank'] else 'Off'}]", callback_data="toggle_bank")],
             [InlineKeyboardButton("🔑 API Key", callback_data="api_key_menu")],
@@ -123,21 +123,14 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if fiat == "custom":
             user_states[chat_id] = "waiting_fiat"
             keyboard = [[InlineKeyboardButton("◀️ Cancel", callback_data="set_fiat")]]
-            await query.edit_message_text(
-                "💱 Enter Fiat currency code:\n\nExample: MMK, THB, USD",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
+            await query.edit_message_text("💱 Enter Fiat currency code:\n\nExample: MMK, THB, USD", reply_markup=InlineKeyboardMarkup(keyboard))
         else:
             settings["fiat"] = fiat
             keyboard = [[InlineKeyboardButton("◀️ Back", callback_data="settings")]]
             await query.edit_message_text(f"✅ Fiat changed to: {fiat}", reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif query.data == "set_coin":
-        text = (
-            "🪙 Select Your Coin!\n\n"
-            "Please choose the cryptocurrency you want to trade.\n\n"
-            "Select from the list or enter a custom coin name."
-        )
+        text = "🪙 Select Your Coin!\n\nPlease choose the cryptocurrency you want to trade."
         keyboard = [
             [InlineKeyboardButton("USDT", callback_data="coin_USDT")],
             [InlineKeyboardButton("BTC", callback_data="coin_BTC")],
@@ -153,10 +146,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if coin == "custom":
             user_states[chat_id] = "waiting_coin"
             keyboard = [[InlineKeyboardButton("◀️ Cancel", callback_data="set_coin")]]
-            await query.edit_message_text(
-                "🪙 Enter Coin name:\n\nExample: USDT, BTC, ETH",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
+            await query.edit_message_text("🪙 Enter Coin name:\n\nExample: USDT, BTC, ETH", reply_markup=InlineKeyboardMarkup(keyboard))
         else:
             settings["coin"] = coin
             keyboard = [[InlineKeyboardButton("◀️ Back", callback_data="settings")]]
@@ -175,6 +165,14 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[InlineKeyboardButton("◀️ Cancel", callback_data="settings")]]
         await query.edit_message_text(
             f"💵 Enter Min Amount:\n\nCurrent: {settings['min_amount']}\n\nType the new amount (numbers only)",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    elif query.data == "set_target":
+        user_states[chat_id] = "waiting_target"
+        keyboard = [[InlineKeyboardButton("◀️ Cancel", callback_data="settings")]]
+        await query.edit_message_text(
+            f"🎯 Enter Target Price:\n\nCurrent: {settings['target_value']}\n\nBot will only place orders when price is less than this value.\n\nType the new target price (numbers only)",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
@@ -211,6 +209,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📊 Statistics\n\n"
             f"💰 Best Buy: {buy} {settings['fiat']}\n"
             f"💸 Best Sell: {sell} {settings['fiat']}\n"
+            f"🎯 Target Price: {settings['target_value']}\n"
             f"🤖 Status: {'Running' if settings['running'] else 'Stopped'}\n"
             f"🔑 API Key: {'✅ Set' if settings['api_key'] else '❌ Not Set'}\n"
         )
@@ -275,6 +274,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"✅ Min amount changed to: {text}", reply_markup=InlineKeyboardMarkup(keyboard))
             except ValueError:
                 await update.message.reply_text("❌ Numbers only! Example: 180000")
+
+        elif state == "waiting_target":
+            try:
+                settings["target_value"] = int(text)
+                user_states.pop(chat_id)
+                keyboard = [[InlineKeyboardButton("◀️ Back to Settings", callback_data="settings")]]
+                await update.message.reply_text(f"✅ Target price changed to: {text}", reply_markup=InlineKeyboardMarkup(keyboard))
+            except ValueError:
+                await update.message.reply_text("❌ Numbers only! Example: 3100")
 
         elif state == "waiting_api_key":
             settings["api_key"] = text
