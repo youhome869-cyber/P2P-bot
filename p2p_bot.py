@@ -13,7 +13,7 @@ from telegram.ext import (
 )
 
 # ==================== SETTINGS ====================
-BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"
+BOT_TOKEN = "7576496100:AAGN80S-wXdo-1V88evhjxjxsFM2tHlpVPQ"
 ADMIN_IDS = []  # သင့် Telegram ID ထည့်ပါ ဥပမာ [123456789]
 
 logging.basicConfig(level=logging.INFO)
