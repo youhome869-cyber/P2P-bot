@@ -1,4 +1,2 @@
-python-telegram-bot==20.7
-requests==2.31.0
-httpcore==0.17.3
-httpx==0.24.1
+python-telegram-bot[job-queue]==21.3
+requests
